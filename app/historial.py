@@ -54,12 +54,20 @@ def clave(rubro: str | None, ciudad: str | None, zona: str | None = None) -> tup
 # Criterio: rubros que registran marca (nombre propio, logo, local o producto).
 RUBROS: dict[str, list[str]] = {
     "Frecuentes": [
-        "tiendas de ropa", "panaderías", "gimnasios", "cafeterías", "cervecerías",
-        "peluquerías", "centros de estética", "pastelerías", "clínicas veterinarias",
-        "tiendas de muebles", "restaurantes", "ópticas",
+        "discotecas", "salas de conciertos", "promotoras de eventos", "estudios de grabación",
+        "restaurantes", "puestos de mercado gastronómico", "cocinas solo delivery",
+        "cervecerías", "cafeterías", "tiendas de ropa", "centros de estética", "pastelerías",
+    ],
+    "Música y noche": [
+        "discotecas", "clubs nocturnos", "salas de conciertos", "bares de copas",
+        "promotoras de eventos", "promotoras musicales", "agencias de artistas",
+        "sellos discográficos", "estudios de grabación", "productoras musicales",
+        "escuelas de música", "tiendas de instrumentos", "festivales", "salas de ensayo",
+        "academias de DJ",
     ],
     "Hostelería": [
-        "restaurantes", "asadores", "pizzerías", "hamburgueserías", "sushi",
+        "restaurantes", "restaurantes nuevos", "puestos de mercado gastronómico",
+        "chiringuitos", "cocinas solo delivery", "asadores", "pizzerías", "hamburgueserías", "sushi",
         "comida para llevar", "bocadillerías", "bares de tapas", "comida vegana",
         "cafeterías", "café de especialidad", "teterías", "panaderías", "pastelerías",
         "heladerías", "chocolaterías", "cervecerías artesanales", "bares",
@@ -293,6 +301,28 @@ VARIANTES: dict[str, list[str]] = {
     "hostal": ["hotel", "pensión", "apartamentos turísticos"],
     "evento": ["salón de eventos", "organización de eventos", "catering", "wedding planner"],
     "catering": ["servicio de catering", "salón de eventos", "organización de eventos"],
+
+    # --- musica y noche ---
+    "discoteca": ["club nocturno", "sala de fiestas", "bar de copas", "sala de baile"],
+    "club": ["discoteca", "club nocturno", "sala de fiestas", "bar de copas"],
+    "concierto": ["sala de conciertos", "sala de música en directo", "auditorio", "música en vivo"],
+    "promotora": ["promotora de eventos", "promotora musical", "organización de conciertos", "agencia de booking"],
+    "artista": ["agencia de artistas", "management musical", "agencia de booking", "representación artística"],
+    "discografico": ["sello discográfico", "discográfica", "editorial musical", "productora musical"],
+    "sello": ["sello discográfico", "discográfica", "editorial musical"],
+    "grabacion": ["estudio de grabación", "productora musical", "estudio de mezcla", "sala de ensayo"],
+    "productora": ["productora musical", "productora audiovisual", "estudio de grabación"],
+    "festival": ["festival de música", "promotora de eventos", "organización de eventos"],
+    "ensayo": ["sala de ensayo", "local de ensayo", "estudio de grabación"],
+    "dj": ["academia de DJ", "escuela de DJ", "productora musical"],
+    "instrumento": ["tienda de música", "luthier", "tienda de instrumentos musicales"],
+    "copa": ["bar de copas", "coctelería", "pub", "discoteca"],
+
+    # --- gastronomia nueva ---
+    "mercado": ["puesto de mercado", "mercado gastronómico", "food hall", "street food"],
+    "chiringuito": ["chiringuito de playa", "beach bar", "bar de playa", "terraza"],
+    "delivery": ["comida a domicilio", "dark kitchen", "cocina fantasma", "comida para llevar"],
+    "cocina": ["dark kitchen", "comida a domicilio", "obrador", "catering"],
 }
 
 # Zonas/barrios de las ciudades grandes, para el campo "Zona". Solo tiene

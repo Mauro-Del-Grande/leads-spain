@@ -19,7 +19,7 @@ from flask import (Flask, Response, g, jsonify, redirect, render_template,
 from sqlalchemy import select, update
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import apify, auth, claves, crm, db, historial, ia, trabajos
+from . import apify, auth, claves, crm, db, historial, ia, registros, trabajos
 from .crm import ErrorCRM
 
 
@@ -139,6 +139,10 @@ def _rutas(app: Flask, motor) -> None:
     def _error_ia(exc):
         return jsonify({"error": str(exc)}), 502
 
+    @app.errorhandler(registros.RegistroError)
+    def _error_registro(exc):
+        return jsonify({"error": str(exc)}), 502
+
     @app.errorhandler(415)
     def _no_json(_):
         return jsonify({"error": "Pedido inválido."}), 415
@@ -222,8 +226,15 @@ def _rutas(app: Flask, motor) -> None:
     def api_hoy():
         with motor.connect() as conn:
             c = crm.cola(conn)
+            regs = registros.leer(conn, [l["id"] for l in c["leads"]])
+            cola = []
+            for l in c["leads"]:
+                v = crm.vista(l)
+                r = regs.get(l["id"])
+                v["registro_nivel"] = r["nivel"] if r and r["marca"] == v["marca"] else None
+                cola.append(v)
             return jsonify({"pendientes": c["pendientes"], "contactados_hoy": c["contactados_hoy"],
-                            "cola": [crm.vista(l) for l in c["leads"]],
+                            "cola": cola, "euipo": registros.configurado(),
                             "canales_contacto": list(crm.CANALES_CONTACTO.items()),
                             "seguimientos": [crm.vista(l) for l in crm.seguimientos(conn)]})
 
@@ -259,8 +270,28 @@ def _rutas(app: Flask, motor) -> None:
             lead = crm.obtener(conn, lead_id)
             if not lead:
                 return jsonify({"error": "Ese lead ya no existe (puede haberse fusionado)."}), 404
-            return jsonify({"lead": crm.vista(lead), "canales_contacto": list(crm.CANALES_CONTACTO.items()), "historial": crm.historial(conn, lead_id),
+            v = crm.vista(lead)
+            reg = registros.leer(conn, [lead_id]).get(lead_id)
+            return jsonify({"lead": v, "canales_contacto": list(crm.CANALES_CONTACTO.items()),
+                            "registro": reg, "euipo": registros.configurado(),
+                            "enlaces_registro": registros.enlaces_manuales(v["marca"]), "historial": crm.historial(conn, lead_id),
                             "contacto": crm.contacto_de(conn, lead_id)})
+
+    @app.post("/api/leads/<lead_id>/registros")
+    @auth.requiere_login()
+    def api_revisar_registros(lead_id):
+        """Busca ahora en la EUIPO marcas iguales o parecidas a la de este negocio."""
+        with motor.connect() as conn:
+            lead = crm.obtener(conn, lead_id)
+        if not lead:
+            return jsonify({"error": "Ese lead ya no existe."}), 404
+        v = crm.vista(lead)
+        resultado = registros.revisar(v["marca"], v.get("rubro") or "")
+        with motor.begin() as conn:
+            fila = registros.guardar(conn, lead_id, v["marca"], resultado)
+            db.evento(conn, "registros", lead_id, usuario_nombre(), nivel=resultado["nivel"],
+                      coincidencias=resultado["total"])
+        return jsonify({"registro": fila})
 
     @app.patch("/api/leads/<lead_id>")
     @auth.requiere_login()
@@ -427,7 +458,17 @@ def _rutas(app: Flask, motor) -> None:
         """Prueba la clave contra el servicio y, si anda, la guarda cifrada."""
         if servicio not in claves.SERVICIOS:
             return jsonify({"error": "Servicio desconocido."}), 404
-        clave = claves.limpiar(cuerpo().get("clave"))
+        d = cuerpo()
+        if servicio == "euipo":
+            cid, sec = claves.limpiar(d.get("client_id")), claves.limpiar(d.get("client_secret"))
+            if not (8 <= len(cid) <= 200 and 8 <= len(sec) <= 400) or any(c.isspace() for c in cid + sec):
+                return jsonify({"error": "Pega el Client ID y el Client Secret completos, sin espacios."}), 400
+            clave = json.dumps({"client_id": cid, "client_secret": sec})
+            ok = registros.probar(clave) + "."
+            with motor.begin() as conn:
+                claves.guardar(conn, servicio, clave, usuario_nombre())
+            return jsonify({"ok": ok, "claves": claves.resumen()})
+        clave = claves.limpiar(d.get("clave"))
         if len(clave) < 20 or len(clave) > 400 or any(c.isspace() for c in clave):
             return jsonify({"error": "Eso no parece una clave: cópiala completa, sin espacios."}), 400
         if servicio == "apify":

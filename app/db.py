@@ -153,6 +153,19 @@ plantillas = Table(
     Column("actualizado", String(40), nullable=False),
 )
 
+# Cruce con registros de marcas (EUIPO, y OEPM cuando haya acceso). Una fila
+# por lead: el ultimo chequeo. Si cambia la marca, se vuelve a revisar.
+registros = Table(
+    "registros", meta,
+    Column("lead_id", String(36), primary_key=True),   # sin FK: sobrevive a fusiones
+    Column("marca", String(200), nullable=False),      # la marca que se busco
+    Column("nivel", String(10)),                       # rojo|amarillo|verde (None si fallo)
+    Column("resultado", Text),                         # JSON con las coincidencias
+    Column("error", Text),
+    Column("intentos", Integer, nullable=False, default=0),
+    Column("revisado", String(40), nullable=False),    # ISO UTC
+)
+
 esquema = Table(
     "schema_version", meta,
     Column("version", Integer, primary_key=True),

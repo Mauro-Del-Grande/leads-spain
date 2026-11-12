@@ -41,6 +41,24 @@ Guía paso a paso para el cliente: [GUIA-CLAVES.md](GUIA-CLAVES.md).
 > Si se cambia `SECRET_KEY`, las claves guardadas no se pueden leer: la app lo
 > avisa en Ajustes y hay que volver a pegarlas.
 
+## Cruce con registros de marcas (EUIPO)
+
+Para cada prospecto de prioridad alta o media, el trabajo de fondo busca en la
+API oficial de la EUIPO (Trademark Search) marcas de la UE iguales, que suenan
+igual o muy parecidas, y deja un semáforo (rojo / amarillo / verde) según el
+parecido y si comparten clase de Niza con la actividad del negocio
+(`registros.py`). Se ve en la tarjeta de Hoy y en la ficha, con enlace a cada
+marca. Es orientativo: el juicio sobre el riesgo es de la abogada.
+
+Las credenciales (Client ID + Client Secret de dev.euipo.europa.eu, con la
+suscripción a "Trademark search" aprobada) se cargan en Ajustes → Conexiones.
+Guía: [GUIA-EUIPO.md](GUIA-EUIPO.md). `EUIPO_ENTORNO=sandbox` apunta al entorno
+de pruebas de la EUIPO.
+
+**Pendiente:** marcas solo nacionales (OEPM). Su servicio web pide usuario y
+contraseña que da la OEPM por formulario; mientras tanto la ficha enlaza al
+Localizador y a TMview para revisar a mano.
+
 ## Garantías
 
 | Qué | Cómo se garantiza |
@@ -157,5 +175,6 @@ set TEST_DATABASE_URL=postgresql://...   &&   .venv\Scripts\pytest
 | `app/historial.py` | rubros, variantes, barrios y "no pagar dos veces la misma búsqueda" |
 | `app/trabajos.py` | trabajo de fondo: búsquedas e IA, recuperación al reiniciar |
 | `app/ia.py` | Claude: prioridad y marca, con salida JSON validada |
-| `app/claves.py` | claves de Apify/Anthropic del cliente, cifradas en la base |
+| `app/claves.py` | claves de Apify/Anthropic/EUIPO del cliente, cifradas en la base |
+| `app/registros.py` | cruce con la EUIPO: parecido de nombres, clases de Niza y semáforo |
 | `app/plantillas.py` | extracción de la marca a partir del título de Maps |

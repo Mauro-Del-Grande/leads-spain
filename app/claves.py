@@ -32,6 +32,8 @@ from . import db
 SERVICIOS: dict[str, dict[str, str]] = {
     "apify": {"nombre": "Apify", "entorno": "APIFY_TOKEN"},
     "anthropic": {"nombre": "Anthropic (IA)", "entorno": "ANTHROPIC_API_KEY"},
+    # JSON {"client_id": ..., "client_secret": ...} (ver registros.py)
+    "euipo": {"nombre": "EUIPO (registro de marcas de la UE)", "entorno": "EUIPO_CREDENCIALES"},
 }
 
 _cache: dict[str, str] = {}
@@ -84,7 +86,7 @@ def guardar(conn: Connection, servicio: str, clave: str, usuario: str | None) ->
     if not db.insertar_si_no_existe(conn, db.config, {"clave": k, "valor": cifrado}):
         conn.execute(update(db.config).where(db.config.c.clave == k).values(valor=cifrado))
     # Nunca la clave en el historial: solo que cambio y como termina.
-    db.evento(conn, "clave", None, usuario, servicio=servicio, termina_en=clave[-4:])
+    db.evento(conn, "clave", None, usuario, servicio=servicio, termina_en=_visible(servicio, clave))
     with _lock:
         _cache[servicio] = clave
         _ilegibles.discard(servicio)
@@ -111,10 +113,22 @@ def resumen() -> dict[str, Any]:
             "nombre": info["nombre"],
             "configurada": bool(usada),
             "origen": "app" if propia else ("servidor" if entorno else ""),
-            "termina_en": usada[-4:] if usada else "",
+            "termina_en": _visible(servicio, usada),
             "ilegible": servicio in ilegibles,
         }
     return salida
+
+
+def _visible(servicio: str, valor: str) -> str:
+    """Lo unico que se muestra: los ultimos 4 caracteres (del Client ID en la EUIPO)."""
+    if not valor:
+        return ""
+    if servicio == "euipo":
+        try:
+            valor = str(json.loads(valor).get("client_id") or "")
+        except (ValueError, AttributeError):
+            return ""
+    return valor[-4:]
 
 
 def limpiar(clave: Any) -> str:

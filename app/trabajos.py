@@ -25,7 +25,7 @@ from typing import Any
 from sqlalchemy import and_, func, insert, select, update
 from sqlalchemy.engine import Engine
 
-from . import apify, crm, db, ia
+from . import apify, crm, db, ia, registros
 from .db import ahora_iso, busquedas, leads
 
 log = logging.getLogger(__name__)
@@ -209,6 +209,42 @@ def paso_ia(motor: Engine, lote: int = 24) -> int:
     return len(res)
 
 
+def paso_registros(motor: Engine, lote: int = 4) -> int:
+    """
+    Cruce con la EUIPO de los prospectos prometedores (alta/media, sin contactar)
+    que todavia no se revisaron, o cuya marca cambio. Pocos por vuelta: es una
+    API publica y no hay apuro.
+    """
+    if not registros.configurado():
+        return 0
+    with motor.connect() as conn:
+        candidatos = [dict(r._mapping) for r in conn.execute(
+            select(leads).where(and_(leads.c.estado == "nuevo", leads.c.ia_estado == "ok",
+                                     leads.c.prioridad.in_(("alta", "media"))))
+            .order_by(leads.c.prioridad, leads.c.creado).limit(200))]
+        hechos = registros.leer(conn, [l["id"] for l in candidatos])
+    pendientes = []
+    for l in candidatos:
+        marca = crm.vista(l)["marca"]
+        r = hechos.get(l["id"])
+        if r and r["marca"] == marca and (r["nivel"] or (r["intentos"] or 0) >= registros.MAX_INTENTOS):
+            continue
+        pendientes.append((l, marca))
+        if len(pendientes) >= lote:
+            break
+    for l, marca in pendientes:
+        try:
+            res = registros.revisar(marca, l.get("rubro") or "")
+            with motor.begin() as conn:
+                registros.guardar(conn, l["id"], marca, res)
+        except registros.RegistroError as exc:
+            log.warning("Registros: %s", exc)
+            with motor.begin() as conn:
+                registros.guardar(conn, l["id"], marca, None, str(exc))
+            break                                   # si la EUIPO falla, no insistir esta vuelta
+    return len(pendientes)
+
+
 def recuperar_al_iniciar(motor: Engine) -> None:
     """Una importacion cortada por un reinicio vuelve a 'corriendo' (es idempotente)."""
     with motor.begin() as conn:
@@ -232,7 +268,7 @@ def iniciar(motor: Engine) -> None:
 
     def _ciclo() -> None:
         while not _parar.is_set():
-            for paso in (paso_busquedas, paso_ia):
+            for paso in (paso_busquedas, paso_ia, paso_registros):
                 try:
                     paso(motor)
                 except Exception:                  # noqa: BLE001 - el hilo no se muere nunca

@@ -299,6 +299,7 @@ function tarjetaCola(l) {
       <input value="${esc(l.marca)}" data-marca-original="${esc(l.marca)}" id="m-${esc(l.id)}" maxlength="200" aria-label="Marca">
     </div>
     ${l.motivo_ia ? `<div class="motivo">${esc(l.motivo_ia)}</div>` : ""}
+    ${chipRegistro(l.registro_nivel)}
     <div class="datos-contacto">${datosContacto(l) || '<span class="sutil">Sin datos de contacto: búscalo en Maps.</span>'}</div>
     <div class="canales">
       <button class="btn primario" data-registrar="${esc(l.id)}">Registrar contacto</button>
@@ -307,6 +308,14 @@ function tarjetaCola(l) {
     </div>
   </article>`;
 }
+
+const REGISTRO = {
+  rojo: ["reg-rojo", "⚠ Marca igual o muy parecida en la UE"],
+  amarillo: ["reg-amarillo", "Hay marcas parecidas en la UE: revisar"],
+  verde: ["reg-verde", "Sin marcas parecidas en la UE"],
+};
+const chipRegistro = n => n && REGISTRO[n]
+  ? `<div class="chip-registro ${REGISTRO[n][0]}">${esc(REGISTRO[n][1])}</div>` : "";
 
 /** Guarda la marca si se corrigio en la tarjeta. */
 async function guardarMarcaTarjeta(leadId) {
@@ -405,7 +414,45 @@ async function abrirLead(id) {
   } catch (e) { avisar(e.message, "error"); }
 }
 
-function pintarFicha({ lead: l, historial, contacto }) {
+function panelRegistros(l, registro, euipo, enlaces) {
+  const manual = `<p class="sutil">Revisar a mano:
+      <a href="${esc(enlaces.oepm)}" target="_blank" rel="noopener">Localizador de la OEPM</a> (marcas españolas) ·
+      <a href="${esc(enlaces.tmview)}" target="_blank" rel="noopener">TMview</a> (todas las oficinas de la UE)</p>`;
+  const guardado = registro && registro.marca === l.marca;
+  if (!euipo && !guardado) {
+    return `<div class="panel" id="panel-registros"><h3>Registros de marcas</h3>
+      <p class="sutil">Conecta la EUIPO en <b>Ajustes → Conexiones</b> y la app buscará sola marcas de la UE iguales o
+        parecidas a <b>${esc(l.marca)}</b>.</p>${manual}</div>`;
+  }
+  let cuerpo;
+  const r = registro && registro.marca === l.marca ? registro : null;
+  if (!r) {
+    cuerpo = `<p class="sutil">Todavía no se revisó la marca <b>${esc(l.marca)}</b> en la EUIPO.</p>`;
+  } else if (!r.resultado) {
+    cuerpo = `<p class="error">No se pudo revisar: ${esc(r.error || "error desconocido")}</p>`;
+  } else {
+    const res = r.resultado;
+    cuerpo = `${chipRegistro(res.nivel)}
+      <p class="sutil">Revisado ${fecha(r.revisado)} · clases de Niza probables del negocio:
+        ${res.clases_negocio.length ? res.clases_negocio.join(", ") : "sin determinar"}</p>
+      ${res.coincidencias.length ? `<ul class="lista-marcas">${res.coincidencias.map(c => `
+        <li class="m-${esc(c.nivel)}">
+          <div><a href="${esc(c.url)}" target="_blank" rel="noopener"><b>${esc(c.denominacion)}</b></a>
+            <span class="chip">${esc(c.como)}</span></div>
+          <div class="sutil">${esc(c.estado_es)} · clases ${esc(c.clases.join(", ") || "–")}${c.clases_en_comun.length ? ` · <b>en común: ${esc(c.clases_en_comun.join(", "))}</b>` : ""}
+            · ${esc(c.titular || "titular no informado")} · nº ${esc(c.numero)}</div>
+        </li>`).join("")}</ul>${res.total > res.coincidencias.length ? `<p class="sutil">Y ${res.total - res.coincidencias.length} más.</p>` : ""}`
+      : `<p class="sutil">No apareció ninguna marca activa de la UE igual o parecida.</p>`}`;
+  }
+  return `<div class="panel" id="panel-registros"><h3>Registros de marcas (UE)</h3>${cuerpo}
+    <p class="sutil">Es una orientación automática: decidir si hay riesgo de confusión es trabajo tuyo.
+      No incluye todavía las marcas solo españolas (OEPM).</p>
+    ${manual}
+    ${euipo ? `<button class="btn chico" id="revisar-registros">${r ? "Revisar de nuevo" : "Revisar ahora"}</button>`
+      : `<p class="sutil">Para volver a revisar, conecta la EUIPO en Ajustes → Conexiones.</p>`}</div>`;
+}
+
+function pintarFicha({ lead: l, historial, contacto, registro, euipo, enlaces_registro }) {
   const enlaces = [];
   if (l.telefono_e164) enlaces.push(`<a href="tel:${esc(l.telefono_e164)}">Llamar</a>`);
   if (l.instagram) enlaces.push(`<a href="https://instagram.com/${esc(l.instagram)}" target="_blank" rel="noopener">Ver Instagram</a>`);
@@ -429,6 +476,8 @@ function pintarFicha({ lead: l, historial, contacto }) {
       ${l.motivo_ia ? `<dt>IA</dt><dd>${esc(l.motivo_ia)}</dd>` : ""}
     </dl>
     <div class="fila-acciones">${enlaces.join(" · ")}</div>
+
+    ${panelRegistros(l, registro, euipo, enlaces_registro)}
 
     <div class="panel">
       <h3>Estado</h3>
@@ -501,6 +550,13 @@ function pintarFicha({ lead: l, historial, contacto }) {
   $$("[data-reabrir]", $("#panel")).forEach(b => b.onclick = () => {
     if (confirm(`¿Volver a "${ETIQUETA[b.dataset.reabrir]}"?`)) cambiarEstado(id, b.dataset.reabrir, true, b);
   });
+  const rev = $("#revisar-registros");
+  if (rev) rev.onclick = ev => conBoton(ev.target, async () => {
+    ev.target.textContent = "Buscando en la EUIPO…";
+    await api(`/api/leads/${encodeURIComponent(id)}/registros`, { metodo: "POST", datos: {} });
+    abrirLead(id);
+    refrescarVistaActual();
+  });
   $("#guardar-seguimiento").onclick = ev => guardarCampos(id, ["proxima_accion", "proxima_fecha", "notas"], ev.target);
   $("#guardar-plata").onclick = ev => {
     const cobrado = $("#e-monto_cobrado").value.trim();
@@ -534,6 +590,7 @@ function itemHistorial(ev) {
   else if (ev.tipo === "reabierto") txt = `Reabierto: ${ETIQUETA[d.desde] || d.desde} → ${ETIQUETA[d.hasta] || d.hasta}`;
   else if (ev.tipo === "contacto") txt = `Primer contacto: ${CANAL[d.canal] || d.canal}${d.nota ? " — " + d.nota : ""}`;
   else if (ev.tipo === "nota") txt = `📝 ${d.texto}`;
+  else if (ev.tipo === "registros") txt = `Revisión en la EUIPO: ${({ rojo: "riesgo alto", amarillo: "revisar", verde: "sin coincidencias" })[d.nivel] || d.nivel} (${d.coincidencias} coincidencias)`;
   else if (ev.tipo === "editado") txt = `Datos editados: ${Object.keys(d.despues || {}).join(", ")}`;
   else if (ev.tipo === "fusionado") txt = `Se fusionó un duplicado (${d.motivo || ""})`;
   else if (ev.tipo === "completado") txt = `Datos completados desde ${d.fuente}: ${(d.campos || []).join(", ")}`;
@@ -1128,6 +1185,36 @@ function tarjetaClave(sv, k) {
     </div>`;
 }
 
+function tarjetaEuipo(k) {
+  const estado = k.ilegible
+    ? `<span class="chip e-no-interesa">hay que volver a cargarla</span>`
+    : k.configurada
+      ? `<span class="chip e-cliente">conectada</span> <span class="sutil">Client ID termina en …${esc(k.termina_en)}</span>`
+      : `<span class="chip">opcional</span>`;
+  return `
+    <div class="clave-servicio">
+      <h3>${esc(k.nombre)} ${estado}</h3>
+      <p class="sutil">Para el cruce con registros: la app busca en la EUIPO marcas de la UE iguales o parecidas a la de
+        cada prospecto y te marca el riesgo con un semáforo.</p>
+      <details ${k.configurada ? "" : "open"}><summary class="sutil">Cómo consigo el Client ID y el Client Secret</summary>
+        <ol>
+          <li>Crea una cuenta gratis en la web de la EUIPO
+            (<a href="https://euipo.europa.eu/ohimportal/es/web/guest/login?loginmode=register" target="_blank" rel="noopener">registro</a>).</li>
+          <li>Entra en <a href="https://dev.euipo.europa.eu/" target="_blank" rel="noopener">dev.euipo.europa.eu</a>
+            con ese usuario (botón <b>Sign in</b>).</li>
+          <li>Arriba, en <b>Apps</b>, registra una app (nombre: "Radar de Marcas"). Te da un <b>Client ID</b> y un <b>Client Secret</b>.</li>
+          <li>En el catálogo de APIs abre <b>Trademark search</b>, toca <b>Get access</b> / suscribirse, elige el plan y acepta las condiciones.</li>
+          <li>Espera el correo de aprobación (puede tardar unos días). Después pega aquí los dos datos y toca <b>Guardar y probar</b>.</li>
+        </ol></details>
+      <div class="fila-clave">
+        <input id="k-euipo-id" autocomplete="off" spellcheck="false" placeholder="Client ID" aria-label="Client ID de la EUIPO">
+        <input id="k-euipo-secret" type="password" autocomplete="off" spellcheck="false" placeholder="Client Secret" aria-label="Client Secret de la EUIPO">
+        <button class="btn primario chico" id="guardar-euipo">Guardar y probar</button>
+        ${k.origen === "app" ? `<button class="btn chico fantasma" data-quitar-clave="euipo">Quitar</button>` : ""}
+      </div>
+    </div>`;
+}
+
 async function cargarAjustes() {
   const cont = $("#ajustes");
   try {
@@ -1155,6 +1242,7 @@ async function cargarAjustes() {
           y Anthropic (la IA que los ordena). Pega aquí tus claves: se prueban al guardarlas, se guardan cifradas
           y nadie puede volver a verlas, ni siquiera desde esta pantalla.</p>
         ${["apify", "anthropic"].map(sv => tarjetaClave(sv, cl.claves[sv])).join("")}
+        ${tarjetaEuipo(cl.claves.euipo)}
         ${est.ia_pendientes ? `<p class="sutil">${est.ia_pendientes} ${est.ia_pendientes === 1 ? "negocio esperando" : "negocios esperando"} que la IA los clasifique.</p>` : ""}
       </div>
 
@@ -1199,6 +1287,16 @@ async function cargarAjustes() {
         cargarAjustes();
       } finally { b.textContent = "Guardar y probar"; }
     }));
+    $("#guardar-euipo").onclick = ev => conBoton(ev.target, async () => {
+      const id = $("#k-euipo-id").value.trim(), secreto = $("#k-euipo-secret").value.trim();
+      if (!id || !secreto) { avisar("Pega el Client ID y el Client Secret.", "error"); return; }
+      ev.target.textContent = "Probando…";
+      try {
+        const r = await api("/api/claves/euipo", { metodo: "POST", datos: { client_id: id, client_secret: secreto } });
+        avisar(r.ok + " Credenciales guardadas.", "ok");
+        cargarAjustes();
+      } finally { ev.target.textContent = "Guardar y probar"; }
+    });
     $$("[data-quitar-clave]").forEach(b => b.onclick = () => {
       if (!confirm("¿Quitar esta clave? Las búsquedas o la IA dejarán de funcionar hasta que cargues otra.")) return;
       conBoton(b, async () => {

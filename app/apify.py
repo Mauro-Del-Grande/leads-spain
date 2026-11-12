@@ -14,6 +14,7 @@ los cerrados se descartan aca con `permanentlyClosed`, gratis.
 """
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Iterable
@@ -21,7 +22,10 @@ from typing import Any
 
 import requests
 
+from . import claves
 from .identidad import normalizar_email, normalizar_usuario_ig, sin_acentos
+
+log = logging.getLogger(__name__)
 
 API = "https://api.apify.com/v2"
 ACTOR_MAPS = os.environ.get("APIFY_ACTOR_MAPS", "compass~crawler-google-places")
@@ -238,23 +242,28 @@ def estimar_costo(cantidad: int, con_contactos: bool) -> float:
 # --------------------------------------------------------------------------
 # Cliente HTTP
 # --------------------------------------------------------------------------
+def configurado() -> bool:
+    return bool(claves.valor("apify"))
+
+
 def _token() -> str:
-    tok = os.environ.get("APIFY_TOKEN", "").strip()
+    tok = claves.valor("apify")
     if not tok:
-        raise ApifyError("Falta configurar APIFY_TOKEN.")
+        raise ApifyError("Falta la clave de Apify: cárgala en Ajustes → Conexiones.")
     return tok
 
 
-def _pedir(metodo: str, ruta: str, **kw: Any) -> Any:
+def _pedir(metodo: str, ruta: str, token: str | None = None, **kw: Any) -> Any:
     # El token va en el header, no en la URL: asi no queda en ningun log.
-    headers = {"Authorization": f"Bearer {_token()}"}
+    headers = {"Authorization": f"Bearer {token or _token()}"}
     try:
         r = requests.request(metodo, f"{API}{ruta}", headers=headers,
                              timeout=kw.pop("timeout", 60), **kw)
     except requests.RequestException as exc:
-        raise ApifyError(f"No se pudo conectar con Apify: {exc}") from exc
+        log.warning("Apify: error de conexion: %s", exc)
+        raise ApifyError("No se pudo conectar con Apify. Vuelve a intentarlo en un rato.") from exc
     if r.status_code == 401:
-        raise ApifyError("Apify rechazó el token (401). Revisa APIFY_TOKEN.")
+        raise ApifyError("Apify rechazó la clave (401). Revisa que esté bien copiada.")
     if r.status_code == 402:
         raise ApifyError("Sin créditos en Apify (402). Carga saldo o espera al próximo ciclo.")
     if r.status_code == 403:
@@ -322,9 +331,9 @@ def items_dataset(dataset_id: str, lote: int = 500) -> list[dict[str, Any]]:
     return salida
 
 
-def probar_token() -> str:
+def probar_token(token: str | None = None) -> str:
     """Nombre de usuario de la cuenta (para el boton 'probar' de Configuracion)."""
-    d = _pedir("GET", "/users/me")["data"]
+    d = _pedir("GET", "/users/me", token=token)["data"]
     return d.get("username") or d.get("id") or "ok"
 
 

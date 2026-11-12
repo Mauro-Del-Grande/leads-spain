@@ -27,6 +27,20 @@ en la app solo se **registra** cómo fue.
 | Importes | Pesos | Euros |
 | IA | INPI | OEPM / EUIPO, quita S.L., S.A., C.B. del nombre |
 
+## Claves del cliente
+
+Cada cliente usa **sus propias cuentas** de Apify y Anthropic. Las pega en
+**Ajustes → Conexiones**: la app las prueba contra el servicio y solo si
+funcionan las guarda **cifradas** en la base (con una llave derivada de
+`SECRET_KEY`). Nunca se vuelven a mostrar ni quedan en el historial: solo los
+últimos 4 caracteres. La clave cargada en la app tiene prioridad sobre las
+variables `APIFY_TOKEN` / `ANTHROPIC_API_KEY`, que quedan como respaldo.
+
+Guía paso a paso para el cliente: [GUIA-CLAVES.md](GUIA-CLAVES.md).
+
+> Si se cambia `SECRET_KEY`, las claves guardadas no se pueden leer: la app lo
+> avisa en Ajustes y hay que volver a pegarlas.
+
 ## Garantías
 
 | Qué | Cómo se garantiza |
@@ -62,8 +76,8 @@ búsqueda ya se hizo. Los resultados entran solos en unos minutos y la IA los cl
    |---|---|
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (referencia al servicio de Postgres) |
    | `SECRET_KEY` | una clave larga al azar: `python -c "import secrets; print(secrets.token_urlsafe(48))"` |
-   | `APIFY_TOKEN` | tu token de Apify |
-   | `ANTHROPIC_API_KEY` | tu key de Anthropic |
+   | `APIFY_TOKEN` | *(opcional)* respaldo si el cliente no cargó su clave |
+   | `ANTHROPIC_API_KEY` | *(opcional)* respaldo si el cliente no cargó su clave |
    | `USUARIO_INICIAL_EMAIL` | el email del primer usuario |
    | `USUARIO_INICIAL_NOMBRE` | tu nombre |
    | `USUARIO_INICIAL_CLAVE` | contraseña de 10 caracteres o más |
@@ -143,4 +157,5 @@ set TEST_DATABASE_URL=postgresql://...   &&   .venv\Scripts\pytest
 | `app/historial.py` | rubros, variantes, barrios y "no pagar dos veces la misma búsqueda" |
 | `app/trabajos.py` | trabajo de fondo: búsquedas e IA, recuperación al reiniciar |
 | `app/ia.py` | Claude: prioridad y marca, con salida JSON validada |
+| `app/claves.py` | claves de Apify/Anthropic del cliente, cifradas en la base |
 | `app/plantillas.py` | extracción de la marca a partir del título de Maps |

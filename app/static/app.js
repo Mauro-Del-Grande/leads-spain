@@ -1090,10 +1090,48 @@ async function cargarMetricas() {
 /* ====================================================================
    AJUSTES
    ==================================================================== */
+const AYUDA_CLAVE = {
+  apify: `<ol>
+      <li>Entra en <a href="https://console.apify.com/sign-up" target="_blank" rel="noopener">console.apify.com</a> y crea una cuenta (puede ser con Google).</li>
+      <li>Ve a <b>Settings → API &amp; Integrations</b>
+        (<a href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener">enlace directo</a>).</li>
+      <li>En <b>Personal API tokens</b>, copia el token (empieza por <code>apify_api_</code>).</li>
+      <li>Pégalo aquí abajo y toca <b>Guardar y probar</b>.</li>
+    </ol>
+    <p class="sutil">El plan gratis trae un poco de crédito al mes para probar. Para buscar en serio conviene un plan de pago
+      (cada búsqueda de 40 negocios cuesta unos 0,16 US$).</p>`,
+  anthropic: `<ol>
+      <li>Entra en <a href="https://platform.claude.com" target="_blank" rel="noopener">platform.claude.com</a> (la consola de Anthropic) y crea una cuenta.</li>
+      <li>Ve a <b>Settings → Billing</b> y toca <b>Buy credits</b>. Con 5 US$ hay para muchísimas búsquedas.</li>
+      <li>Ve a <b>Settings → API keys</b>, toca <b>Create key</b>, ponle un nombre (por ejemplo "Radar de Marcas") y copia la clave
+        (empieza por <code>sk-ant-</code>). Solo se muestra una vez.</li>
+      <li>Pégala aquí abajo y toca <b>Guardar y probar</b>.</li>
+    </ol>`,
+};
+
+function tarjetaClave(sv, k) {
+  const estado = k.ilegible
+    ? `<span class="chip e-no-interesa">hay que volver a cargarla</span>`
+    : k.configurada
+      ? `<span class="chip e-cliente">conectada</span> <span class="sutil">termina en …${esc(k.termina_en)}${k.origen === "servidor" ? " · cargada en el servidor" : ""}</span>`
+      : `<span class="chip e-no-interesa">falta</span>`;
+  return `
+    <div class="clave-servicio">
+      <h3>${esc(k.nombre)} ${estado}</h3>
+      <details ${k.configurada ? "" : "open"}><summary class="sutil">Cómo consigo esta clave</summary>${AYUDA_CLAVE[sv]}</details>
+      <div class="fila-clave">
+        <input id="k-${sv}" type="password" autocomplete="off" spellcheck="false"
+          placeholder="${k.configurada ? "Pega una clave nueva para reemplazarla" : "Pega aquí tu clave"}" aria-label="Clave de ${esc(k.nombre)}">
+        <button class="btn primario chico" data-guardar-clave="${sv}">Guardar y probar</button>
+        ${k.origen === "app" ? `<button class="btn chico fantasma" data-quitar-clave="${sv}">Quitar</button>` : ""}
+      </div>
+    </div>`;
+}
+
 async function cargarAjustes() {
   const cont = $("#ajustes");
   try {
-    const [c, est] = await Promise.all([api("/api/config"), api("/api/estado")]);
+    const [c, est, cl] = await Promise.all([api("/api/config"), api("/api/estado"), api("/api/claves")]);
     const cfg = c.config;
     cont.innerHTML = `
       <div class="panel aviso-legal">
@@ -1111,13 +1149,13 @@ async function cargarAjustes() {
         <button class="btn primario" id="guardar-config">Guardar</button>
       </div>
 
-      <div class="panel">
+      <div class="panel" id="conexiones">
         <h2>Conexiones</h2>
-        <p>Apify: ${est.apify ? "configurado" : '<span class="error">falta APIFY_TOKEN</span>'} · IA: ${est.ia ? "configurada (" + esc(c.modelo_ia) + ")" : '<span class="error">falta ANTHROPIC_API_KEY</span>'}${est.ia_pendientes ? ` · ${est.ia_pendientes} leads esperando clasificación` : ""}</p>
-        <div class="fila-acciones">
-          <button class="btn chico" data-probar="apify">Probar Apify</button>
-          <button class="btn chico" data-probar="ia">Probar IA</button>
-        </div>
+        <p class="sutil">La app usa dos servicios con <b>tus propias cuentas</b>: Apify (busca los negocios en Google Maps)
+          y Anthropic (la IA que los ordena). Pega aquí tus claves: se prueban al guardarlas, se guardan cifradas
+          y nadie puede volver a verlas, ni siquiera desde esta pantalla.</p>
+        ${["apify", "anthropic"].map(sv => tarjetaClave(sv, cl.claves[sv])).join("")}
+        ${est.ia_pendientes ? `<p class="sutil">${est.ia_pendientes} ${est.ia_pendientes === 1 ? "negocio esperando" : "negocios esperando"} que la IA los clasifique.</p>` : ""}
       </div>
 
       <div class="panel">
@@ -1150,10 +1188,25 @@ async function cargarAjustes() {
       await api("/api/config", { metodo: "POST", datos });
       avisar("Guardado", "ok");
     });
-    $$("[data-probar]").forEach(b => b.onclick = () => conBoton(b, async () => {
-      const r = await api("/api/probar/" + b.dataset.probar, { metodo: "POST", datos: {} });
-      avisar(r.ok, "ok");
+    $$("[data-guardar-clave]").forEach(b => b.onclick = () => conBoton(b, async () => {
+      const sv = b.dataset.guardarClave, input = $("#k-" + sv);
+      if (!input.value.trim()) { avisar("Pega la clave primero.", "error"); return; }
+      b.textContent = "Probando…";
+      try {
+        const r = await api("/api/claves/" + sv, { metodo: "POST", datos: { clave: input.value } });
+        input.value = "";
+        avisar(r.ok + " Clave guardada.", "ok");
+        cargarAjustes();
+      } finally { b.textContent = "Guardar y probar"; }
     }));
+    $$("[data-quitar-clave]").forEach(b => b.onclick = () => {
+      if (!confirm("¿Quitar esta clave? Las búsquedas o la IA dejarán de funcionar hasta que cargues otra.")) return;
+      conBoton(b, async () => {
+        await api("/api/claves/" + b.dataset.quitarClave, { metodo: "DELETE", datos: {} });
+        avisar("Clave quitada", "ok");
+        cargarAjustes();
+      });
+    });
     $("#crear-usuario").onclick = ev => conBoton(ev.target, async () => {
       await api("/api/usuarios", { metodo: "POST", datos: { nombre: $("#u-nombre").value, email: $("#u-email").value, clave: $("#u-clave").value } });
       avisar("Usuario creado", "ok");

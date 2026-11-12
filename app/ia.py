@@ -14,6 +14,7 @@ import logging
 import os
 from typing import Any
 
+from . import claves
 from .plantillas import marca_valida
 
 log = logging.getLogger(__name__)
@@ -87,14 +88,15 @@ ESQUEMA = {
 
 
 def configurada() -> bool:
-    return bool(os.environ.get("ANTHROPIC_API_KEY", "").strip())
+    return bool(claves.valor("anthropic"))
 
 
-def _cliente():
-    if not configurada():
-        raise IAError("Falta configurar ANTHROPIC_API_KEY.")
+def _cliente(api_key: str | None = None):
+    clave = api_key or claves.valor("anthropic")
+    if not clave:
+        raise IAError("Falta la clave de Anthropic: cárgala en Ajustes → Conexiones.")
     import anthropic
-    return anthropic.Anthropic(max_retries=3, timeout=120)
+    return anthropic.Anthropic(api_key=clave, max_retries=3, timeout=120)
 
 
 def _resumen(lead: dict[str, Any]) -> dict[str, Any]:
@@ -160,7 +162,7 @@ def clasificar(leads: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         try:
             datos = _llamar(client, prompt)
         except anthropic.AuthenticationError as exc:
-            raise IAError("Anthropic rechazó la API key (401).") from exc
+            raise IAError("Anthropic rechazó la clave (401). Cárgala de nuevo en Ajustes → Conexiones.") from exc
         except anthropic.PermissionDeniedError as exc:
             raise IAError("La API key de Anthropic no tiene permiso (403).") from exc
         except anthropic.APIError as exc:
@@ -186,9 +188,23 @@ def clasificar(leads: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return salida
 
 
-def probar() -> str:
-    client = _cliente()
-    resp = client.messages.create(model=MODELO, max_tokens=50,
-                                  output_config={"effort": "low"},
-                                  messages=[{"role": "user", "content": "Responde solo: ok"}])
+def probar(api_key: str | None = None) -> str:
+    import anthropic
+    client = _cliente(api_key)
+    try:
+        resp = client.messages.create(model=MODELO, max_tokens=50,
+                                      output_config={"effort": "low"},
+                                      messages=[{"role": "user", "content": "Responde solo: ok"}])
+    except anthropic.AuthenticationError as exc:
+        raise IAError("Anthropic rechazó la clave. Revisa que esté bien copiada.") from exc
+    except anthropic.PermissionDeniedError as exc:
+        raise IAError("La clave de Anthropic no tiene permiso.") from exc
+    except anthropic.BadRequestError as exc:
+        if "credit" in str(exc).lower():
+            raise IAError("La cuenta de Anthropic no tiene saldo: compra créditos en Billing.") from exc
+        log.warning("IA: error al probar la clave: %s", exc)
+        raise IAError("Anthropic no aceptó la prueba. Revisa la clave y el saldo de la cuenta.") from exc
+    except anthropic.APIError as exc:
+        log.warning("IA: error al probar la clave: %s", exc)
+        raise IAError("No se pudo conectar con Anthropic. Vuelve a intentarlo en un rato.") from exc
     return f"ok ({resp.model})"

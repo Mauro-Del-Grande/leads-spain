@@ -19,7 +19,7 @@ from flask import (Flask, Response, g, jsonify, redirect, render_template,
 from sqlalchemy import select, update
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from . import apify, auth, crm, db, historial, ia, trabajos
+from . import apify, auth, claves, crm, db, historial, ia, trabajos
 from .crm import ErrorCRM
 
 
@@ -71,6 +71,7 @@ def create_app(config: dict[str, Any] | None = None) -> Flask:
 
     motor = db.crear_motor(app.config.get("DATABASE_URL"))
     db.inicializar(motor)
+    claves.cargar(motor)
     app.extensions["motor"] = motor
     _usuario_inicial(motor)
     if app.config.get("TRABAJOS", os.environ.get("TRABAJOS", "1") != "0"):
@@ -212,7 +213,7 @@ def _rutas(app: Flask, motor) -> None:
             return jsonify({
                 "usuario": auth.usuario_actual(), "contactados_hoy": crm.contactados_hoy(conn),
                 "busquedas_activas": len(activas), "ia_pendientes": len(ia_pend),
-                "apify": bool(os.environ.get("APIFY_TOKEN")), "ia": ia.configurada(),
+                "apify": apify.configurado(), "ia": ia.configurada(),
                 "hoy": db.hoy_local()})
 
     # ------------------------------------------------------------------- hoy
@@ -336,8 +337,8 @@ def _rutas(app: Flask, motor) -> None:
         if len(ciudades) > MAX_CIUDADES_BARRIDO:
             return jsonify({"error": f"Máximo {MAX_CIUDADES_BARRIDO} ciudades por barrido."}), 400
         con_contactos = bool(d.get("con_contactos"))
-        if not os.environ.get("APIFY_TOKEN"):
-            return jsonify({"error": "Falta configurar APIFY_TOKEN en Railway."}), 400
+        if not apify.configurado():
+            return jsonify({"error": "Falta la clave de Apify: cárgala en Ajustes → Conexiones."}), 400
         zona = (d.get("zona") or "").strip()[:120] if len(ciudades) == 1 else ""
         with motor.begin() as conn:
             db.bloquear(conn, "busquedas")
@@ -413,6 +414,39 @@ def _rutas(app: Flask, motor) -> None:
             if valores:
                 db.evento(conn, "config", None, usuario_nombre(), **valores)
             return jsonify({"config": db.leer_config(conn)})
+
+    # ----------------------------------------------------------------- claves
+    @app.get("/api/claves")
+    @auth.requiere_login()
+    def api_claves():
+        return jsonify({"claves": claves.resumen()})
+
+    @app.post("/api/claves/<servicio>")
+    @auth.requiere_login()
+    def api_guardar_clave(servicio):
+        """Prueba la clave contra el servicio y, si anda, la guarda cifrada."""
+        if servicio not in claves.SERVICIOS:
+            return jsonify({"error": "Servicio desconocido."}), 404
+        clave = claves.limpiar(cuerpo().get("clave"))
+        if len(clave) < 20 or len(clave) > 400 or any(c.isspace() for c in clave):
+            return jsonify({"error": "Eso no parece una clave: cópiala completa, sin espacios."}), 400
+        if servicio == "apify":
+            cuenta = apify.probar_token(clave)
+            ok = f"Apify conectado (cuenta {cuenta})."
+        else:
+            ok = f"IA conectada: {ia.probar(clave)}."
+        with motor.begin() as conn:
+            claves.guardar(conn, servicio, clave, usuario_nombre())
+        return jsonify({"ok": ok, "claves": claves.resumen()})
+
+    @app.delete("/api/claves/<servicio>")
+    @auth.requiere_login()
+    def api_quitar_clave(servicio):
+        if servicio not in claves.SERVICIOS:
+            return jsonify({"error": "Servicio desconocido."}), 404
+        with motor.begin() as conn:
+            claves.quitar(conn, servicio, usuario_nombre())
+        return jsonify({"claves": claves.resumen()})
 
     @app.post("/api/probar/<que>")
     @auth.requiere_login()

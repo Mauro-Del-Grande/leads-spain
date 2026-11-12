@@ -570,3 +570,8 @@ td.num, th.num { text-align: right; }
   border: 1px solid var(--borde-fuerte); border-radius: 12px; cursor: pointer; }
 .opciones-canal .opcion:has(input:checked) { border-color: var(--primario); background: var(--primario-suave); }
 .aviso-legal { border-left: 4px solid var(--alerta); }
+.clave-servicio { padding: .8rem 0; border-top: 1px solid var(--borde); }
+.clave-servicio h3 { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin: 0 0 .4rem; }
+.clave-servicio ol { margin: .4rem 0; padding-left: 1.2rem; line-height: 1.55; }
+.fila-clave { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+.fila-clave input { flex: 1 1 240px; }

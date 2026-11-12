@@ -1,0 +1,68 @@
+# Restaurar un backup en una base DESTINO.
+#
+# Se corre solo a mano (Actions -> Restaurar backup -> Run workflow) y pide:
+#   - run_id: el numero de la corrida de "Backup de la base" a restaurar
+#   - confirmar: escribir RESTAURAR
+#
+# El destino es el secreto DATABASE_RESTORE_URL. Si coincide con la base de
+# produccion (DATABASE_BACKUP_URL), se niega a correr: para restaurar sobre
+# produccion hay que hacerlo a proposito cambiando ese secreto, nunca por error.
+name: Restaurar backup
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Numero de corrida del backup (esta en la URL: .../actions/runs/NUMERO)"
+        required: true
+      confirmar:
+        description: "Escribi RESTAURAR para confirmar (borra y reemplaza la base destino)"
+        required: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  restaurar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Controles de seguridad
+        env:
+          DESTINO: ${{ secrets.DATABASE_RESTORE_URL }}
+          PRODUCCION: ${{ secrets.DATABASE_BACKUP_URL }}
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: |
+          set -euo pipefail
+          [ "$CONFIRMAR" = "RESTAURAR" ] || { echo "::error::No se confirmo (hay que escribir RESTAURAR)"; exit 1; }
+          [ -n "${DESTINO:-}" ] || { echo "::error::Falta el secreto DATABASE_RESTORE_URL"; exit 1; }
+          if [ "$DESTINO" = "${PRODUCCION:-}" ]; then
+            echo "::error::El destino es la base de produccion. Cambia DATABASE_RESTORE_URL si de verdad queres pisarla."
+            exit 1
+          fi
+
+      - name: Bajar el backup
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+          pattern: backup-*
+          merge-multiple: true
+
+      - name: Restaurar y contar
+        env:
+          DESTINO: ${{ secrets.DATABASE_RESTORE_URL }}
+        run: |
+          set -euo pipefail
+          archivo="$(ls leads-*.dump | head -n 1)"
+          echo "Restaurando $archivo"
+          cat resumen.txt || true
+          docker run --rm -v "$PWD:/in" -e DESTINO postgres:18 \
+            bash -c "pg_restore --clean --if-exists --no-owner --no-privileges --exit-on-error -d \"\$DESTINO\" /in/$archivo"
+          echo "--- En la base destino quedo:"
+          docker run --rm -e DESTINO postgres:18 psql "$DESTINO" -At -c \
+            "select 'leads: ' || count(*) from leads
+             union all select 'contactos: ' || count(*) from contactos
+             union all select 'eventos: ' || count(*) from eventos
+             union all select 'busquedas: ' || count(*) from busquedas"

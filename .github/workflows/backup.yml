@@ -1,0 +1,66 @@
+# Backup nocturno de la base de produccion (Railway Postgres).
+#
+# Hace un pg_dump completo, verifica que el archivo sea valido y que tenga la
+# tabla de leads, y lo guarda 90 dias como artifact de este repo (privado).
+# Si falla, GitHub le manda un mail al dueño del repo.
+#
+# Requiere el secreto DATABASE_BACKUP_URL = DATABASE_PUBLIC_URL del Postgres
+# de produccion (Settings -> Secrets and variables -> Actions).
+name: Backup de la base
+
+on:
+  schedule:
+    - cron: "0 6 * * *"        # 03:00 hora argentina, todos los dias
+  workflow_dispatch:           # boton "Run workflow" para correrlo a mano
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Volcar y verificar la base
+        env:
+          DB: ${{ secrets.DATABASE_BACKUP_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DB:-}" ]; then
+            echo "::error::Falta el secreto DATABASE_BACKUP_URL"
+            exit 1
+          fi
+          fecha="$(TZ=America/Argentina/Buenos_Aires date +%Y-%m-%d_%H%M)"
+          archivo="leads-${fecha}.dump"
+
+          # pg_dump 18 puede volcar servidores de version igual o anterior
+          docker run --rm -v "$PWD:/out" -e DB postgres:18 \
+            bash -c 'pg_dump "$DB" --format=custom --no-owner --no-privileges --file=/out/backup.dump'
+          mv backup.dump "$archivo"
+
+          # El archivo tiene que poder leerse y tener los datos de leads
+          docker run --rm -v "$PWD:/out" postgres:18 pg_restore --list "/out/$archivo" > contenido.txt
+          grep -q "TABLE DATA public leads" contenido.txt || { echo "::error::El backup no contiene la tabla leads"; exit 1; }
+
+          docker run --rm -e DB postgres:18 psql "$DB" -At -c \
+            "select 'leads: ' || count(*) from leads
+             union all select 'contactos: ' || count(*) from contactos
+             union all select 'eventos: ' || count(*) from eventos
+             union all select 'busquedas: ' || count(*) from busquedas" | tee resumen.txt
+          echo "backup: $archivo ($(du -h "$archivo" | cut -f1))" | tee -a resumen.txt
+          echo "ARCHIVO=$archivo" >> "$GITHUB_ENV"
+          echo "FECHA=$fecha" >> "$GITHUB_ENV"
+
+      - name: Guardar el backup (90 dias)
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-${{ env.FECHA }}
+          path: |
+            ${{ env.ARCHIVO }}
+            resumen.txt
+          retention-days: 90
+          if-no-files-found: error

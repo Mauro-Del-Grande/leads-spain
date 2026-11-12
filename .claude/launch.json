@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "leads-dev",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-Command", "$env:DATA_DIR='data-dev'; $env:TRABAJOS='0'; .\\.venv\\Scripts\\python -m flask --app app run --port 5055"],
+      "port": 5055
+    }
+  ]
+}
